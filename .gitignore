@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+inventory.md
+agents.md
+git.md
+SESSION_NOTES.md

@@ -1,0 +1,130 @@
+# DBL Operator
+
+The DBL Operator is a **cockpit-style client** for interacting with a DBL-style Gateway. It is an observer with intervention capability: it prepares intents, declares context, and renders views derived from Gateway events.
+
+All normative logic lives exclusively in the **Gateway**:
+- Policy evaluation
+- Decision making
+- Digest computation
+- Boundary enforcement
+
+The operator never makes decisions and never owns authoritative state.
+
+## Design Stance
+**Operator = Client, not Governor**
+
+- **Observes** Gateway outputs as the single source of truth.
+- **Submits** intents but never computes digests or applies policy logic locally.
+- **Respects** boundaries: if the Gateway rejects or denies an intent, the Operator reports it as-is. It does not "help", "retry", or "fix" outcomes.
+- **Zero-Internal-State**: Never reaches into Gateway internals.
+
+## What this is
+- A minimal set of datatypes for **anchors** (`thread_id`, `turn_id`, `parent_turn_id`), **intents**, and **context declarations**.
+- A deterministic intent composer and context declarer.
+- A Gateway client interface (HTTP client + Fake client for tests).
+- Boring presenters and a thin CLI that render Gateway state exactly as-is.
+
+## What this is not
+- No policy logic or boundary enforcement.
+- Not an agent or a planner.
+- Not a UI product or a state store.
+
+## Installation
+Use a virtual environment:
+
+```bash
+pip install -e .
+```
+
+This installs the `dbl-operator` command and ensures imports resolve correctly for tests.
+
+## Environment Variables
+If no Gateway URL is provided, the operator falls back to a `FakeGatewayClient` (useful for wiring tests).
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `DBL_GATEWAY_BASE_URL` | Base URL of the Gateway | (empty) → Fake client |
+| `DBL_GATEWAY_TOKEN` | Bearer token (OIDC/Auth) | none |
+| `DBL_GATEWAY_TIMEOUT_SECS` | Request timeout | 15.0 |
+
+**Example (Bash/Zsh):**
+```bash
+export DBL_GATEWAY_BASE_URL=http://127.0.0.1:8010
+```
+
+**Example (PowerShell):**
+```powershell
+$env:DBL_GATEWAY_BASE_URL = "http://127.0.0.1:8010"
+```
+
+## CLI Usage
+
+### Send an Intent
+Submits an intent to the Gateway. A successful call returns `202 Accepted`, meaning the intent was queued for processing.
+
+```bash
+dbl-operator send-intent \
+  --thread-id t-1 \
+  --turn-id turn-1 \
+  --intent-type PING \
+  --correlation-id my-unique-id
+```
+
+### View Thread Timeline
+Renders a derived view of all turns observed for a specific thread.
+
+```bash
+dbl-operator thread-view --thread-id t-1
+```
+
+### View Decision for a Turn
+Shows the decision event produced by the Gateway for a specific turn.
+
+```bash
+dbl-operator decision-view --thread-id t-1 --turn-id turn-1
+```
+
+### Audit Events
+Lists all raw Gateway events (INTENT, DECISION, EXECUTION) for a thread.
+
+```bash
+dbl-operator audit-view --thread-id t-1
+# Or filter by turn
+dbl-operator audit-view --thread-id t-1 --turn-id turn-1
+```
+
+### Live Event Stream (Tail)
+To monitor the Gateway's internal event stream in real-time, you can use `curl` on the `/tail` surface. This is useful for observing background processing (decisions/executions) as they happen.
+
+**Note**: The Operator uses `/tail` exclusively for **live observation**. It does not rely on `/tail` for historical inspection (use `audit-view` or `/snapshot` for that).
+
+- **Default Join**: On connect, the stream emits the last 20 events by default.
+- **Persistence**: Operators should persist the last received `id` and use the `since` parameter to resume the stream if disconnected.
+
+```bash
+# Bash: Live tail (default)
+curl -N "$DBL_GATEWAY_BASE_URL/tail"
+
+# PowerShell: Resume from cursor
+curl.exe -N "http://127.0.0.1:8010/tail?since=1234"
+```
+
+## Expected Semantics
+- **202 Accepted**: Intent persisted and queued; no decision yet.
+- **DENY**: A valid, correct outcome from the Gateway.
+- **No EXECUTION after DENY**: Expected behavior.
+- **Derived Views**: Views are always derived from events; the operator never invents/infers state.
+
+## Testing
+Run tests via `pytest` to verify the components:
+
+```bash
+python -m pytest
+```
+
+---
+
+## Summary
+The DBL Operator is **intentionally boring**. It is deterministic, transparent, and contract-driven. It is incapable of silent policy drift because it doesn't have a policy to drift with. 
+
+**If something looks wrong, the problem is upstream. The operator’s job is to show you exactly that.**
