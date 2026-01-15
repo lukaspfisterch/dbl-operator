@@ -30,9 +30,11 @@ The operator never makes decisions and never owns authoritative state.
 - Not a UI product or a state store.
 
 ## Installation
-Use a virtual environment:
+Clone the repository and install in editable mode:
 
 ```bash
+git clone https://github.com/lukaspfisterch/dbl-operator.git
+cd dbl-operator
 pip install -e .
 ```
 
