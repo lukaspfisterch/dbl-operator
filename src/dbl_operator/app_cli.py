@@ -73,6 +73,9 @@ def audit_view(client: GatewayClient, args: argparse.Namespace) -> None:
 
 def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
     """Stream events from gateway with color-coded output and auto-reconnect."""
+    import signal
+    import threading
+    
     mode = detect_color_mode(args.color)
     
     # Compile grep pattern if provided
@@ -89,14 +92,30 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
     if args.only:
         only_kinds = {k.strip().upper() for k in args.only.split(",")}
     
+    # Graceful shutdown flag
+    stop_event = threading.Event()
+    
+    def handle_signal(signum: int, frame: object) -> None:
+        stop_event.set()
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+    if hasattr(signal, 'SIGBREAK'):  # Windows-specific
+        signal.signal(signal.SIGBREAK, handle_signal)  # type: ignore[attr-defined]
+    
     last_index: int | None = args.since
     reconnect_delay = 1.0
     max_reconnect_delay = 30.0
+    event_count = 0
     
     try:
-        while True:
+        while not stop_event.is_set():
             try:
                 for event in client.tail(since=last_index, backlog=args.backlog):
+                    if stop_event.is_set():
+                        break
+                        
                     # Track last seen index for reconnect
                     event_index = event.get("index")
                     if isinstance(event_index, int):
@@ -115,6 +134,7 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
                         continue
                     
                     print(line, flush=True)
+                    event_count += 1
                     if args.details:
                         for detail_line in render_tail_details(event, mode):
                             print(detail_line, flush=True)
@@ -123,14 +143,20 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
                     reconnect_delay = 1.0
                     
             except (ConnectionError, OSError) as e:
+                if stop_event.is_set():
+                    break
                 # Auto-reconnect with exponential backoff
                 print(f"\n[connection lost: {e}, reconnecting in {reconnect_delay:.0f}s...]", flush=True)
-                time.sleep(reconnect_delay)
+                # Use wait with timeout so we can check stop_event
+                if stop_event.wait(timeout=reconnect_delay):
+                    break
                 reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
                 continue
                 
     except KeyboardInterrupt:
-        print("\n[tail interrupted]", flush=True)
+        pass
+    
+    print(f"\n[tail stopped, {event_count} events received]", flush=True)
 
 
 def main() -> None:

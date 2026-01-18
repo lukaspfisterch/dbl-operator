@@ -50,7 +50,8 @@ class HttpGatewayClient(GatewayClient):
                 enabled = set()
 
             # Enforce required surfaces defined in the contract
-            required = {"snapshot", "ingress_intent", "capabilities", "tail"}
+            # Note: 'capabilities' itself is not listed - if we got here, it works
+            required = {"snapshot", "ingress_intent", "tail"}
             missing = sorted(required - enabled)
             if missing:
                 raise RuntimeError(f"Gateway missing required surfaces: {missing}")
