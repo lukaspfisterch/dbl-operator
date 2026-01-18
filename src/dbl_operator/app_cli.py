@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 
+from .ansi_colors import detect_color_mode
 from .context_declarer import ContextDeclarer
 from .domain_types import Anchors, ContextRef, DomainAction
 from .gateway_client import FakeGatewayClient, GatewayClient
 from .http_gateway_client import HttpGatewayClient
 from .intent_composer import IntentComposer
 from .presenters import render_audit_view, render_decision_view, render_thread_view
-
-
-import time
+from .tail_presenter import render_tail_details, render_tail_line
 
 
 def _build_client() -> GatewayClient:
@@ -69,6 +69,20 @@ def audit_view(client: GatewayClient, args: argparse.Namespace) -> None:
     print(render_audit_view(events))
 
 
+def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
+    """Stream events from gateway with color-coded output."""
+    mode = detect_color_mode(args.color)
+    
+    try:
+        for event in client.tail(since=args.since, backlog=args.backlog):
+            print(render_tail_line(event, mode))
+            if args.details:
+                for line in render_tail_details(event, mode):
+                    print(line)
+    except KeyboardInterrupt:
+        print("\n[tail interrupted]")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="dbl-operator",
@@ -95,6 +109,13 @@ def main() -> None:
     av.add_argument("--thread-id", required=True)
     av.add_argument("--turn-id", default=None)
 
+    # NEW: tail subcommand with color support
+    tail = sub.add_parser("tail", help="Stream events from gateway (SSE)")
+    tail.add_argument("--since", type=int, default=None, help="Start from index > since")
+    tail.add_argument("--backlog", type=int, default=None, help="Number of recent events on connect")
+    tail.add_argument("--color", choices=["auto", "always", "never"], default="auto", help="Color mode")
+    tail.add_argument("--details", action="store_true", help="Show additional details for DECISION events")
+
     args = parser.parse_args()
     client = _build_client()
     if args.command == "send-intent":
@@ -105,7 +126,10 @@ def main() -> None:
         decision_view(client, args)
     elif args.command == "audit-view":
         audit_view(client, args)
+    elif args.command == "tail":
+        tail_view(client, args)
 
 
 if __name__ == "__main__":
     main()
+

@@ -96,20 +96,30 @@ dbl-operator audit-view --thread-id t-1 --turn-id turn-1
 ```
 
 ### Live Event Stream (Tail)
-To monitor the Gateway's internal event stream in real-time, you can use `curl` on the `/tail` surface. This is useful for observing background processing (decisions/executions) as they happen.
-
-**Note**: The Operator uses `/tail` exclusively for **live observation**. It does not rely on `/tail` for historical inspection (use `audit-view` or `/snapshot` for that).
-
-- **Default Join**: On connect, the stream emits the last 20 events by default.
-- **Persistence**: Operators should persist the last received `id` and use the `since` parameter to resume the stream if disconnected.
+Stream Gateway events in real-time with color-coded output.
 
 ```bash
-# Bash: Live tail (default)
-curl -N "$DBL_GATEWAY_BASE_URL/tail"
+# Stream all events (color auto-detected)
+dbl-operator tail
 
-# PowerShell: Resume from cursor
-curl.exe -N "http://127.0.0.1:8010/tail?since=1234"
+# With details for DECISION events
+dbl-operator tail --details
+
+# Start from a specific index
+dbl-operator tail --since 100
+
+# Force color output
+dbl-operator tail --color always
 ```
+
+**Color coding:**
+- **INTENT**: Cyan
+- **DECISION (ALLOW)**: Green (bold)
+- **DECISION (DENY)**: Red (bold)
+- **EXECUTION**: Gray (dim)
+- **PROOF**: Magenta
+
+**Note**: Use Ctrl+C to stop tailing.
 
 ## Expected Semantics
 - **202 Accepted**: Intent persisted and queued; no decision yet.

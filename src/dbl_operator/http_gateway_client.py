@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 import httpx
 
@@ -159,6 +160,49 @@ class HttpGatewayClient(GatewayClient):
             ))
         return audit_events
 
+    def tail(
+        self,
+        since: int | None = None,
+        backlog: int | None = None,
+    ) -> Iterable[dict]:
+        """
+        Stream events from /tail endpoint using SSE.
+
+        Args:
+            since: Start streaming from index > since
+            backlog: Number of recent events to emit on connect
+
+        Yields:
+            Event dicts from the SSE stream
+        """
+        params: dict[str, str] = {}
+        if since is not None:
+            params["since"] = str(since)
+        if backlog is not None:
+            params["backlog"] = str(backlog)
+
+        url = f"{self.base_url}/tail"
+        headers = dict(self.headers)
+        headers["Accept"] = "text/event-stream"
+
+        # Use no timeout for streaming connection
+        with httpx.Client(timeout=None, headers=headers) as client:
+            with client.stream("GET", url, params=params) as resp:
+                resp.raise_for_status()
+                for raw_line in resp.iter_lines():
+                    if not raw_line:
+                        continue
+                    line = raw_line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if not payload:
+                        continue
+                    try:
+                        yield json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+
     def _fetch_events(self, limit: int = 1000) -> list[dict[str, Any]]:
         # Fetching snapshots to derive views, as no direct timeline surface is documented.
         url = f"{self.base_url}/snapshot"
@@ -168,3 +212,4 @@ class HttpGatewayClient(GatewayClient):
             resp.raise_for_status()
             data = resp.json()
             return data.get("events", [])
+

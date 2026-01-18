@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Iterable, Protocol, Sequence
 
 from .domain_types import (
     AuditEventViewModel,
@@ -23,6 +23,12 @@ class GatewayClient(Protocol):
 
     def get_audit(self, thread_id: str, turn_id: str | None = None) -> Sequence[AuditEventViewModel]: ...
 
+    def tail(
+        self,
+        since: int | None = None,
+        backlog: int | None = None,
+    ) -> Iterable[dict]: ...
+
 
 @dataclass
 class FakeGatewayClient:
@@ -40,3 +46,10 @@ class FakeGatewayClient:
 
     def get_audit(self, thread_id: str, turn_id: str | None = None) -> Sequence[AuditEventViewModel]:
         return ()
+
+    def tail(
+        self,
+        since: int | None = None,
+        backlog: int | None = None,
+    ) -> Iterable[dict]:
+        return iter(())
