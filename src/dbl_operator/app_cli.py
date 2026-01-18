@@ -78,6 +78,10 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
     
     mode = detect_color_mode(args.color)
     
+    # One-time warning if colors disabled in auto mode
+    if args.color == "auto" and not mode.enabled:
+        print("[colors disabled: piped output or NO_COLOR set]", file=sys.stderr, flush=True)
+    
     # Compile grep pattern if provided
     grep_pattern = None
     if args.grep:
@@ -91,6 +95,14 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
     only_kinds: set[str] | None = None
     if args.only:
         only_kinds = {k.strip().upper() for k in args.only.split(",")}
+    
+    # Parse --result filter (for DECISION events)
+    result_filter: str | None = None
+    if args.result:
+        result_filter = args.result.strip().upper()
+        if result_filter not in ("ALLOW", "DENY"):
+            print(f"Invalid --result value: {args.result}. Must be ALLOW or DENY.", file=sys.stderr)
+            sys.exit(1)
     
     # Graceful shutdown flag
     stop_event = threading.Event()
@@ -131,6 +143,13 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
                     event_kind = str(event.get("kind", "")).upper()
                     if only_kinds and event_kind not in only_kinds:
                         continue
+                    
+                    # Apply --result filter (only for DECISION events)
+                    if result_filter and event_kind == "DECISION":
+                        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                        event_result = str(payload.get("result", payload.get("decision", ""))).upper()
+                        if event_result != result_filter:
+                            continue
                     
                     # Render line
                     line = render_tail_line(event, mode)
@@ -200,6 +219,7 @@ def main() -> None:
     tail.add_argument("--color", choices=["auto", "always", "never"], default="auto", help="Color mode (default: auto)")
     tail.add_argument("--details", action="store_true", help="Show additional details for DECISION events")
     tail.add_argument("--only", type=str, default=None, help="Filter by event kind (comma-separated: INTENT,DECISION,EXECUTION)")
+    tail.add_argument("--result", type=str, default=None, help="Filter DECISION events by result (ALLOW or DENY)")
     tail.add_argument("--grep", type=str, default=None, help="Filter output by regex pattern")
 
     args = parser.parse_args()

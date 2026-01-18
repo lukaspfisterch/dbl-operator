@@ -114,7 +114,10 @@ dbl-operator tail --only INTENT,DECISION
 
 # Filter by regex pattern
 dbl-operator tail --grep "thread-123"
-dbl-operator tail --grep "DENY"
+
+# Filter DECISION by result (no regex needed)
+dbl-operator tail --only DECISION --result DENY
+dbl-operator tail --result ALLOW --details
 
 # Force color output
 dbl-operator tail --color always
@@ -126,6 +129,7 @@ dbl-operator tail --color always
 - `--color auto|always|never`: Color mode (default: auto, no color when piped)
 - `--details`: Show additional details for DECISION events
 - `--only KIND[,KIND]`: Filter by event kind (INTENT, DECISION, EXECUTION)
+- `--result ALLOW|DENY`: Filter DECISION events by result
 - `--grep PATTERN`: Filter output by regex pattern
 
 **Color coding:**
