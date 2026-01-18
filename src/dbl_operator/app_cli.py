@@ -6,7 +6,7 @@ import re
 import sys
 import time
 
-from .ansi_colors import detect_color_mode
+from .ansi_colors import detect_color_mode, strip_ansi
 from .context_declarer import ContextDeclarer
 from .domain_types import Anchors, ContextRef, DomainAction
 from .gateway_client import FakeGatewayClient, GatewayClient
@@ -98,11 +98,15 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
     def handle_signal(signum: int, frame: object) -> None:
         stop_event.set()
     
-    # Register signal handlers
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
-    if hasattr(signal, 'SIGBREAK'):  # Windows-specific
-        signal.signal(signal.SIGBREAK, handle_signal)  # type: ignore[attr-defined]
+    # Register signal handlers (wrapped for embedded environments)
+    try:
+        signal.signal(signal.SIGINT, handle_signal)
+        signal.signal(signal.SIGTERM, handle_signal)
+        if hasattr(signal, 'SIGBREAK'):  # Windows-specific
+            signal.signal(signal.SIGBREAK, handle_signal)  # type: ignore[attr-defined]
+    except (ValueError, OSError):
+        # Signal handling not available in this environment
+        pass
     
     last_index: int | None = args.since
     reconnect_delay = 1.0
@@ -120,6 +124,8 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
                     event_index = event.get("index")
                     if isinstance(event_index, int):
                         last_index = event_index
+                    elif isinstance(event_index, str) and event_index.isdigit():
+                        last_index = int(event_index)
                     
                     # Apply --only filter
                     event_kind = str(event.get("kind", "")).upper()
@@ -129,9 +135,11 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
                     # Render line
                     line = render_tail_line(event, mode)
                     
-                    # Apply --grep filter
-                    if grep_pattern and not grep_pattern.search(line):
-                        continue
+                    # Apply --grep filter (on uncolored text to avoid ANSI interference)
+                    if grep_pattern:
+                        plain_line = strip_ansi(line) if mode.enabled else line
+                        if not grep_pattern.search(plain_line):
+                            continue
                     
                     print(line, flush=True)
                     event_count += 1

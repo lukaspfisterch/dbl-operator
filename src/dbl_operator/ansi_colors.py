@@ -9,6 +9,7 @@ __all__ = [
     "ColorMode",
     "detect_color_mode",
     "style",
+    "strip_ansi",
     "FG_RED",
     "FG_GREEN",
     "FG_YELLOW",
@@ -19,6 +20,16 @@ __all__ = [
 ]
 
 CSI = "\x1b["
+ANSI_ESCAPE_RE = None  # Lazy compiled
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    import re
+    global ANSI_ESCAPE_RE
+    if ANSI_ESCAPE_RE is None:
+        ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*m')
+    return ANSI_ESCAPE_RE.sub('', text)
 
 # Foreground colors
 FG_RED = 31

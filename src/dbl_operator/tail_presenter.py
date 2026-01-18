@@ -66,8 +66,27 @@ def render_tail_line(event: dict[str, Any], mode: ColorMode) -> str:
     corr = event.get("correlation_id", "")[:16]
     kind = event.get("kind", "")
 
-    base = f"{idx:>6}  {kind:<10}  t={thread_id}  turn={turn_id}  c={corr}"
+    # For DECISION events, include ALLOW/DENY in the kind field
+    if kind == "DECISION":
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        result = str(payload.get("result", payload.get("decision", ""))).upper()
+        if result in ("ALLOW", "DENY"):
+            kind = f"DECISION/{result}"
+
+    base = f"{idx:>6}  {kind:<15}  t={thread_id}  turn={turn_id}  c={corr}"
     return style(base, mode=mode, fg=fg, bold=bold, dim=dim)
+
+
+def _short_digest(digest: str | None, length: int = 16) -> str:
+    """Shorten a digest, stripping 'sha256:' prefix."""
+    if not digest:
+        return ""
+    # Remove common prefixes
+    for prefix in ("sha256:", "sha512:", "blake2b:"):
+        if digest.startswith(prefix):
+            digest = digest[len(prefix):]
+            break
+    return digest[:length]
 
 
 def render_tail_details(event: dict[str, Any], mode: ColorMode) -> list[str]:
@@ -95,12 +114,14 @@ def render_tail_details(event: dict[str, Any], mode: ColorMode) -> list[str]:
         reason_str = ", ".join(str(r) for r in reasons) if isinstance(reasons, list) else str(reasons)
         out.append("       " + style(f"reasons: {reason_str}", mode=mode, fg=FG_GRAY, dim=True))
 
-    if boundary.get("context_config_digest"):
-        digest = boundary["context_config_digest"]
-        out.append("       " + style(f"config_digest: {digest[:32]}...", mode=mode, fg=FG_GRAY, dim=True))
+    config_digest = boundary.get("context_config_digest")
+    if config_digest:
+        short = _short_digest(config_digest, 16)
+        out.append("       " + style(f"config: {short}...", mode=mode, fg=FG_GRAY, dim=True))
 
     context_digest = payload.get("context_digest")
     if context_digest:
-        out.append("       " + style(f"context_digest: {context_digest[:32]}...", mode=mode, fg=FG_GRAY, dim=True))
+        short = _short_digest(context_digest, 16)
+        out.append("       " + style(f"context: {short}...", mode=mode, fg=FG_GRAY, dim=True))
 
     return out
