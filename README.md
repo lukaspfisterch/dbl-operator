@@ -146,6 +146,39 @@ dbl-operator tail --color always
 
 **Note**: Use Ctrl+C to stop tailing.
 
+### Observability & Analysis
+The operator includes a suite of projections to audit system behavior without relying on Gateway logs.
+
+#### Turn Integrity Check
+Verifies that every turn adheres to the DBL protocol (INTENT -> DECISION -> EXECUTION). Detects gaps and orphaned turns.
+```bash
+dbl-operator integrity
+```
+
+#### Latency Profiling
+Calculates P50/P95 latencies for Policy evaluation and Execution. Helpful to pinpoint performance bottlenecks.
+```bash
+dbl-operator latency
+```
+
+#### Policy Timeline
+Shows which policy version was effective during which time window.
+```bash
+dbl-operator policy-map
+```
+
+#### Decision Statistics
+Aggregates ALLOW/DENY rates per intent type and lists top reason codes.
+```bash
+dbl-operator stats
+```
+
+#### Failure Analysis
+Categorizes failed interactions into Policy Denials, Execution Errors, and technical faults.
+```bash
+dbl-operator failures
+```
+
 ## Expected Semantics
 - **202 Accepted**: Intent persisted and queued; no decision yet.
 - **DENY**: A valid, correct outcome from the Gateway.

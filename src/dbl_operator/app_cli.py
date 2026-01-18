@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+import httpx
 
 from .ansi_colors import detect_color_mode, strip_ansi
 from .context_declarer import ContextDeclarer
@@ -169,7 +170,7 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
                     # Reset reconnect delay on successful event
                     reconnect_delay = 1.0
                     
-            except (ConnectionError, OSError) as e:
+            except (ConnectionError, OSError, httpx.HTTPError) as e:
                 if stop_event.is_set():
                     break
                 # Auto-reconnect with exponential backoff
@@ -186,12 +187,67 @@ def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
     print(f"\n[tail stopped, {event_count} events received]", flush=True)
 
 
+from .projections.integrity import IntegrityProjection
+
+def integrity_view(client: GatewayClient, args: argparse.Namespace) -> None:
+    # Fetch as much history as reasonable for integrity check
+    # For a robust check, we might want ALL history, but snapshot limit is capped.
+    # We use 2000 as "current horizon".
+    events = client._fetch_events(limit=2000)
+    
+    projection = IntegrityProjection()
+    for event in events:
+        projection.feed(event)
+    
+    print(projection.render())   
+
+from .projections.latency import LatencyProjection
+
+def latency_view(client: GatewayClient, args: argparse.Namespace) -> None:
+    events = client._fetch_events(limit=2000)
+    projection = LatencyProjection()
+    for event in events:
+        projection.feed(event)
+    print(projection.render())
+
+from .projections.policy_map import PolicyMapProjection
+from .projections.decision_stats import DecisionStatsProjection
+
+def policy_map_view(client: GatewayClient, args: argparse.Namespace) -> None:
+    events = client._fetch_events(limit=2000)
+    projection = PolicyMapProjection()
+    for event in events:
+        projection.feed(event)
+    print(projection.render())
+
+def stats_view(client: GatewayClient, args: argparse.Namespace) -> None:
+    events = client._fetch_events(limit=2000)
+    projection = DecisionStatsProjection()
+    for event in events:
+        projection.feed(event)
+    print(projection.render())
+
+
+
+from .projections.failures import FailureTaxonomyProjection
+
+def failures_view(client: GatewayClient, args: argparse.Namespace) -> None:
+    events = client._fetch_events(limit=2000)
+    projection = FailureTaxonomyProjection()
+    for event in events:
+        projection.feed(event)
+    print(projection.render())
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="dbl-operator",
         description="Template CLI for a DBL-style Gateway operator. Requires a real GatewayClient to be useful.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # ... (existing parsers kept implicitly if replace works correctly on range)
+    # Wait, replace_file_content requires context matching.
+    # I should target the integrity parser registration and append latency.
 
     send = sub.add_parser("send-intent")
     send.add_argument("--thread-id", required=True)
@@ -212,10 +268,28 @@ def main() -> None:
     av.add_argument("--thread-id", required=True)
     av.add_argument("--turn-id", default=None)
 
+    # Integrity Projection
+    integ = sub.add_parser("integrity", help="Analyze turn integrity (gaps/violations)")
+
+    # Latency Projection
+    lat = sub.add_parser("latency", help="Analyze system latency profile (P50/P95)")
+
+    # Policy Map
+    pmap = sub.add_parser("policy-map", help="Timeline of effective policies")
+
+    # Decision Stats
+    stats = sub.add_parser("stats", help="Decision aggregate statistics")
+
+    # Failure Taxonomy
+    fail = sub.add_parser("failures", help="Categorization of system failures")
+
     # tail subcommand with production hardening
     tail = sub.add_parser("tail", help="Stream events from gateway (SSE)")
+    # ... args ...
     tail.add_argument("--since", type=int, default=None, help="Start from index > since")
-    tail.add_argument("--backlog", type=int, default=None, help="Number of recent events on connect")
+    # ...
+
+    tail.add_argument("--backlog", type=int, default=20, help="Number of recent events on connect (default: 20)")
     tail.add_argument("--color", choices=["auto", "always", "never"], default="auto", help="Color mode (default: auto)")
     tail.add_argument("--details", action="store_true", help="Show additional details for DECISION events")
     tail.add_argument("--only", type=str, default=None, help="Filter by event kind (comma-separated: INTENT,DECISION,EXECUTION)")
@@ -234,6 +308,16 @@ def main() -> None:
         audit_view(client, args)
     elif args.command == "tail":
         tail_view(client, args)
+    elif args.command == "integrity":
+        integrity_view(client, args)
+    elif args.command == "latency":
+        latency_view(client, args)
+    elif args.command == "policy-map":
+        policy_map_view(client, args)
+    elif args.command == "stats":
+        stats_view(client, args)
+    elif args.command == "failures":
+        failures_view(client, args)
 
 
 if __name__ == "__main__":

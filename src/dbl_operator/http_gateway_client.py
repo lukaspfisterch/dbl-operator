@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 import httpx
@@ -161,6 +162,14 @@ class HttpGatewayClient(GatewayClient):
             ))
         return audit_events
 
+    def get_status(self) -> dict[str, Any]:
+        """Fetch current gateway status containing t_index."""
+        url = f"{self.base_url}/status"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(url, headers=self.headers)
+            resp.raise_for_status()
+            return resp.json()
+
     def tail(
         self,
         since: int | None = None,
@@ -176,12 +185,51 @@ class HttpGatewayClient(GatewayClient):
         Yields:
             Event dicts from the SSE stream
         """
-        params: dict[str, str] = {}
-        if since is not None:
-            params["since"] = str(since)
-        if backlog is not None:
-            params["backlog"] = str(backlog)
+        next_since = since
 
+        # Client-side backlog logic:
+        # 1. Get current t_index from /status
+        # 2. Calculate offset for last N events
+        # 3. Fetch specific window via /snapshot
+        if backlog and backlog > 0 and since is None:
+            try:
+                status = self.get_status()
+                # print(f"DEBUG: Status response: {status}", file=sys.stderr)
+                t_index = status.get("t_index")
+                
+                # t_index is the index of the last accepted event (int)
+                # If no events, t_index might be -1 or None depending on implementation. 
+                if isinstance(t_index, int) and t_index >= 0:
+                    # Calculate start index: (current_count) - backlog
+                    # count = t_index + 1
+                    # start = max(0, count - backlog)
+                    start_offset = max(0, t_index - backlog + 1)
+                    # print(f"DEBUG: Fetching backlog: offset={start_offset}, limit={backlog}", file=sys.stderr)
+                    
+                    snap_url = f"{self.base_url}/snapshot"
+                    params = {"offset": start_offset, "limit": backlog}
+                    
+                    with httpx.Client(timeout=self.timeout) as client:
+                        resp = client.get(snap_url, params=params, headers=self.headers)
+                        if resp.status_code == 200:
+                            events = resp.json().get("events", [])
+                            # print(f"DEBUG: Found {len(events)} backlog events", file=sys.stderr)
+                            for event in events:
+                                yield event
+                                idx = event.get("index")
+                                if isinstance(idx, int):
+                                    next_since = idx
+                # else:
+                #    print(f"DEBUG: t_index invalid or < 0: {t_index}", file=sys.stderr)
+            except Exception as e:
+                # If status/snapshot fails, fallback to live tail only
+                # print(f"DEBUG: Backfill failed: {e}", file=sys.stderr)
+                pass
+
+        params: dict[str, str] = {}
+        if next_since is not None:
+            params["since"] = str(next_since)
+        
         url = f"{self.base_url}/tail"
         headers = dict(self.headers)
         headers["Accept"] = "text/event-stream"
