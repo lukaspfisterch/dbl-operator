@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
+import sys
 import time
 
 from .ansi_colors import detect_color_mode
@@ -70,17 +72,65 @@ def audit_view(client: GatewayClient, args: argparse.Namespace) -> None:
 
 
 def tail_view(client: GatewayClient, args: argparse.Namespace) -> None:
-    """Stream events from gateway with color-coded output."""
+    """Stream events from gateway with color-coded output and auto-reconnect."""
     mode = detect_color_mode(args.color)
     
+    # Compile grep pattern if provided
+    grep_pattern = None
+    if args.grep:
+        try:
+            grep_pattern = re.compile(args.grep, re.IGNORECASE)
+        except re.error as e:
+            print(f"Invalid grep pattern: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Parse --only filter
+    only_kinds: set[str] | None = None
+    if args.only:
+        only_kinds = {k.strip().upper() for k in args.only.split(",")}
+    
+    last_index: int | None = args.since
+    reconnect_delay = 1.0
+    max_reconnect_delay = 30.0
+    
     try:
-        for event in client.tail(since=args.since, backlog=args.backlog):
-            print(render_tail_line(event, mode))
-            if args.details:
-                for line in render_tail_details(event, mode):
-                    print(line)
+        while True:
+            try:
+                for event in client.tail(since=last_index, backlog=args.backlog):
+                    # Track last seen index for reconnect
+                    event_index = event.get("index")
+                    if isinstance(event_index, int):
+                        last_index = event_index
+                    
+                    # Apply --only filter
+                    event_kind = str(event.get("kind", "")).upper()
+                    if only_kinds and event_kind not in only_kinds:
+                        continue
+                    
+                    # Render line
+                    line = render_tail_line(event, mode)
+                    
+                    # Apply --grep filter
+                    if grep_pattern and not grep_pattern.search(line):
+                        continue
+                    
+                    print(line, flush=True)
+                    if args.details:
+                        for detail_line in render_tail_details(event, mode):
+                            print(detail_line, flush=True)
+                    
+                    # Reset reconnect delay on successful event
+                    reconnect_delay = 1.0
+                    
+            except (ConnectionError, OSError) as e:
+                # Auto-reconnect with exponential backoff
+                print(f"\n[connection lost: {e}, reconnecting in {reconnect_delay:.0f}s...]", flush=True)
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                continue
+                
     except KeyboardInterrupt:
-        print("\n[tail interrupted]")
+        print("\n[tail interrupted]", flush=True)
 
 
 def main() -> None:
@@ -109,12 +159,14 @@ def main() -> None:
     av.add_argument("--thread-id", required=True)
     av.add_argument("--turn-id", default=None)
 
-    # NEW: tail subcommand with color support
+    # tail subcommand with production hardening
     tail = sub.add_parser("tail", help="Stream events from gateway (SSE)")
     tail.add_argument("--since", type=int, default=None, help="Start from index > since")
     tail.add_argument("--backlog", type=int, default=None, help="Number of recent events on connect")
-    tail.add_argument("--color", choices=["auto", "always", "never"], default="auto", help="Color mode")
+    tail.add_argument("--color", choices=["auto", "always", "never"], default="auto", help="Color mode (default: auto)")
     tail.add_argument("--details", action="store_true", help="Show additional details for DECISION events")
+    tail.add_argument("--only", type=str, default=None, help="Filter by event kind (comma-separated: INTENT,DECISION,EXECUTION)")
+    tail.add_argument("--grep", type=str, default=None, help="Filter output by regex pattern")
 
     args = parser.parse_args()
     client = _build_client()

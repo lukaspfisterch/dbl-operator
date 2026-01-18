@@ -96,7 +96,7 @@ dbl-operator audit-view --thread-id t-1 --turn-id turn-1
 ```
 
 ### Live Event Stream (Tail)
-Stream Gateway events in real-time with color-coded output.
+Stream Gateway events in real-time with color-coded output and auto-reconnect.
 
 ```bash
 # Stream all events (color auto-detected)
@@ -108,9 +108,25 @@ dbl-operator tail --details
 # Start from a specific index
 dbl-operator tail --since 100
 
+# Filter by event kind
+dbl-operator tail --only DECISION
+dbl-operator tail --only INTENT,DECISION
+
+# Filter by regex pattern
+dbl-operator tail --grep "thread-123"
+dbl-operator tail --grep "DENY"
+
 # Force color output
 dbl-operator tail --color always
 ```
+
+**Options:**
+- `--since N`: Start from index > N
+- `--backlog N`: Number of recent events on connect
+- `--color auto|always|never`: Color mode (default: auto, no color when piped)
+- `--details`: Show additional details for DECISION events
+- `--only KIND[,KIND]`: Filter by event kind (INTENT, DECISION, EXECUTION)
+- `--grep PATTERN`: Filter output by regex pattern
 
 **Color coding:**
 - **INTENT**: Cyan
@@ -118,6 +134,11 @@ dbl-operator tail --color always
 - **DECISION (DENY)**: Red (bold)
 - **EXECUTION**: Gray (dim)
 - **PROOF**: Magenta
+
+**Production features:**
+- Auto-reconnect with exponential backoff on connection loss
+- Remembers last seen index for seamless resume
+- Immediate output (flush=True)
 
 **Note**: Use Ctrl+C to stop tailing.
 
